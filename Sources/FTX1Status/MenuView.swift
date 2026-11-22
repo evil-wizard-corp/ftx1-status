@@ -124,6 +124,8 @@ struct MenuView: View {
     private var buttons: some View {
         HStack {
             Button("Refresh") { model.refresh() }
+            Button("Probe now") { model.refresh(forceProbe: true) }
+                .help("Query the radio even if WSJT-X is running (still skipped if the port is open).")
             Button("Copy diagnostics") { model.copyDiagnostics() }
             Spacer()
             if let t = model.snapshot?.timestamp {

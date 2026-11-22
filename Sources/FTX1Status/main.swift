@@ -5,7 +5,7 @@ import FTX1Core
 if CommandLine.arguments.contains("--dump") {
     let lastGood = UserDefaults.standard.object(forKey: "lastGoodBaud") as? Int
     let snap = StatusModel.collect(lastGoodBaud: lastGood, wsjtxRunning: StatusModel.isWSJTXRunning())
-    print(diagnosticsText(snap, evaluate(snap)))
+    print(diagnosticsText(snap.snapshot, evaluate(snap.snapshot)))
     exit(0)
 }
 

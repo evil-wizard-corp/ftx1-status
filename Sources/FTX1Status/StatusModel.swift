@@ -21,25 +21,41 @@ final class StatusModel: ObservableObject {
 
     var wsjtxRunning: Bool { snapshot?.wsjtxRunning ?? false }
 
-    func refresh() {
+    /// Last CAT probe, reused between polls so we don't touch the port every 5 s.
+    private var lastProbe: (result: CATResult, at: Date, ports: [String])?
+    nonisolated private static let probeInterval: TimeInterval = 60
+
+    /// Polls USB/ports/config every call; probes CAT only when allowed (see `collect`).
+    /// `forceProbe` comes from the "Probe now" button.
+    func refresh(forceProbe: Bool = false) {
         guard !inFlight else { return }
         inFlight = true
         let lastGood = UserDefaults.standard.object(forKey: baudKey) as? Int
         let wsjtx = Self.isWSJTXRunning()
+        let previous = lastProbe
         queue.async { [weak self] in
-            let snap = Self.collect(lastGoodBaud: lastGood, wsjtxRunning: wsjtx)
-            let report = evaluate(snap)
+            let snap = Self.collect(lastGoodBaud: lastGood, wsjtxRunning: wsjtx,
+                                    forceProbe: forceProbe, previous: previous)
+            let report = evaluate(snap.snapshot)
             Task { @MainActor in
                 guard let self else { return }
-                if case .ok(let r) = snap.cat { UserDefaults.standard.set(r.baud, forKey: self.baudKey) }
-                self.snapshot = snap
+                if case .ok(let r) = snap.snapshot.cat { UserDefaults.standard.set(r.baud, forKey: self.baudKey) }
+                if let fresh = snap.probed { self.lastProbe = (fresh, Date(), snap.snapshot.radioPorts.map(\.path)) }
+                self.snapshot = snap.snapshot
                 self.report = report
                 self.inFlight = false
             }
         }
     }
 
-    nonisolated static func collect(lastGoodBaud: Int?, wsjtxRunning: Bool) -> Snapshot {
+    /// Probing a tty changes its baud for everyone (termios is per-device), and two readers split the
+    /// reply bytes, so a probe can break WSJT-X's own CAT session. Rules:
+    ///  - never probe a port someone holds open;
+    ///  - never auto-probe while WSJT-X is running (checked again right before opening);
+    ///  - after a successful probe, reuse it for 60 s unless the radio's ports change.
+    nonisolated static func collect(lastGoodBaud: Int?, wsjtxRunning: Bool, forceProbe: Bool = false,
+                                    previous: (result: CATResult, at: Date, ports: [String])? = nil)
+        -> (snapshot: Snapshot, probed: CATResult?) {
         let ports = SerialPorts.enumerate()
         let config = WSJTXConfigFile.load()
         var paths = Set(ports.filter(\.isRadioBridge).map(\.path))
@@ -49,14 +65,26 @@ final class StatusModel: ObservableObject {
         var snap = Snapshot(ports: ports, holders: holders, wsjtxRunning: wsjtxRunning, config: config,
                             cat: .skipped("Radio not found."), lastGoodBaud: lastGoodBaud,
                             audioDevices: AudioDevices.names())
+        guard let target = snap.stableCATPort ?? snap.catPorts.first else { return (snap, nil) }
 
         let held = snap.catHolders
+        let known = lastGoodBaud.map { " Last known rate: \($0)." } ?? ""
         if !held.isEmpty {
             snap.cat = .skipped("CAT port in use by \(held.joined(separator: ", ")); not probing.")
-        } else if let target = snap.stableCATPort ?? snap.catPorts.first {
-            snap.cat = CATProbe.run(path: target.path, preferred: lastGoodBaud)
+            return (snap, nil)
         }
-        return snap
+        if !forceProbe && (wsjtxRunning || isWSJTXRunning()) {
+            snap.cat = .skipped("WSJT-X is running, so not probing (avoids colliding with it).\(known)")
+            return (snap, nil)
+        }
+        if !forceProbe, let prev = previous, case .ok = prev.result,
+           Date().timeIntervalSince(prev.at) < probeInterval, prev.ports == snap.radioPorts.map(\.path) {
+            snap.cat = prev.result
+            return (snap, nil)
+        }
+        let result = CATProbe.run(path: target.path, preferred: lastGoodBaud)
+        snap.cat = result
+        return (snap, result)
     }
 
     nonisolated static func isWSJTXRunning() -> Bool {
