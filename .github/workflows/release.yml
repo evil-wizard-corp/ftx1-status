@@ -17,6 +17,7 @@ jobs:
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           VERSION="${GITHUB_REF_NAME#v}" UNIVERSAL=1 ./build-app.sh
           lipo -info "build/FTX1 Status.app/Contents/MacOS/FTX1Status"
+          "build/FTX1 Status.app/Contents/MacOS/FTX1Status" --version | grep -qx "${GITHUB_REF_NAME#v}"
 
       - name: Zip
         run: |
@@ -56,6 +57,13 @@ jobs:
           git clone git@github.com:evil-wizard-corp/homebrew-tap.git tap
           cd tap
           sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/ftx1-status.rb
+          # Fail loudly if the cask's layout changed and sed matched nothing.
+          grep -q "^  version \"$VERSION\"" Casks/ftx1-status.rb
+          grep -q "^  sha256 \"$SHA\"" Casks/ftx1-status.rb
+          if git diff --quiet; then
+            echo "Cask already at $VERSION"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "ftx1-status $VERSION"
