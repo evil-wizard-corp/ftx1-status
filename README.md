@@ -19,10 +19,27 @@ The CP2105 has two serial ports, and two drivers attach to both of them:
 
 When WSJT-X is pointed at a `SLAB_*` name, it will sometimes end up on the PTT port. Use `/dev/cu.usbserial-…0` at the radio's CAT rate (38400 on this rig).
 
-## Build and install
+## Install
 
-    ./build-app.sh          # installs ~/Applications/FTX1 Status.app
-    swift test              # evaluation, parsing, and lsof tests
+    brew install --cask evil-wizard-corp/tap/ftx1-status
+
+Or download the zip from [Releases](https://github.com/evil-wizard-corp/ftx1-status/releases). The app isn't notarized, because there's no paid Apple Developer account. The Homebrew cask clears the quarantine flag for you. If you install from the zip and macOS blocks the app, run `xattr -dr com.apple.quarantine "/Applications/FTX1 Status.app"`, or use System Settings → Privacy & Security → Open Anyway.
+
+## Build from source
+
+    ./build-app.sh --install   # builds build/FTX1 Status.app and copies it to ~/Applications
+    swift test                 # evaluation, parsing, and lsof tests
+
+## Releasing
+
+Push a tag like `v0.2.0`. The release workflow:
+
+1. runs the tests
+2. builds a universal (arm64 + x86_64) app
+3. creates a GitHub release with the zip attached
+4. bumps the cask in [evil-wizard-corp/homebrew-tap](https://github.com/evil-wizard-corp/homebrew-tap)
+
+Tags with a hyphen, like `v0.2.0-beta.1`, become pre-releases and skip the cask bump.
 
 Running `.build/debug/FTX1Status --dump` prints the same diagnostics in the terminal.
 

@@ -1,0 +1,62 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: swift test
+
+      - name: Build universal app
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          VERSION="${GITHUB_REF_NAME#v}" UNIVERSAL=1 ./build-app.sh
+          lipo -info "build/FTX1 Status.app/Contents/MacOS/FTX1Status"
+
+      - name: Zip
+        run: |
+          ZIP="FTX1-Status-$VERSION.zip"
+          ditto -c -k --keepParent "build/FTX1 Status.app" "$ZIP"
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE=""
+          [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
+          gh release create "$GITHUB_REF_NAME" "$ZIP" $PRERELEASE --title "FTX1 Status $VERSION" --generate-notes --notes "$(cat <<NOTES
+          Install with Homebrew:
+
+              brew install --cask evil-wizard-corp/tap/ftx1-status
+
+          Or download the zip below. The app is not notarized; if macOS blocks it, run
+          \`xattr -dr com.apple.quarantine "/Applications/FTX1 Status.app"\` or use
+          System Settings → Privacy & Security → Open Anyway.
+
+          SHA-256: \`$SHA\`
+          NOTES
+          )"
+
+      - name: Update Homebrew tap
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:evil-wizard-corp/homebrew-tap.git tap
+          cd tap
+          sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$SHA\"/" Casks/ftx1-status.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "ftx1-status $VERSION"
+          git push
