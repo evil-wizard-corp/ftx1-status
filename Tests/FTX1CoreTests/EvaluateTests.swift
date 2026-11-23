@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import FTX1Core
 
@@ -75,6 +76,29 @@ struct EvaluateTests {
         #expect(check(evaluate(s), "Audio in")?.level == .error)
     }
 
+    @Test func testSLABOnlyIsInfoAndFixKeepsPort() {
+        // Only the Silicon Labs driver is loaded, so there's no usbserial- name to move to.
+        let slabOnly = radioPorts().filter { !$0.hasStableName }
+        let r = evaluate(snap(port: "/dev/cu.SLAB_USBtoUART5", baud: 4800, running: false, ports: slabOnly))
+        #expect(check(r, "WSJT-X port")?.level == .info)
+        #expect(r.suggestedFix == ConfigFix(port: "/dev/cu.SLAB_USBtoUART5", baud: 38400))
+    }
+
+    @Test func testSLABOnlyWrongPortSuggestsCATName() {
+        let slabOnly = radioPorts().filter { !$0.hasStableName }
+        let r = evaluate(snap(port: "/dev/cu.SLAB_USBtoUART", baud: 38400, running: false, ports: slabOnly))
+        #expect(check(r, "WSJT-X port")?.level == .error)
+        #expect(r.suggestedFix == ConfigFix(port: "/dev/cu.SLAB_USBtoUART5", baud: 38400))
+    }
+
+    @Test func testRememberedBaudMismatchIsOnlyAWarning() {
+        let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 4800,
+                              holders: ["/dev/cu.usbserial-ABCD12340": ["wsjtx"]],
+                              cat: .skipped("in use")).with(lastGoodBaud: 38400))
+        #expect(check(r, "WSJT-X baud")?.level == .warn)
+        #expect(check(r, "WSJT-X baud")!.detail.contains("last answered"))
+    }
+
     @Test func testNoCATReply() {
         let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 38400, running: false,
                               cat: .noReply(triedBauds: [38400, 4800])))
@@ -110,14 +134,94 @@ struct ParsingTests {
         #expect(c.rig == "Yaesu FTX-1")
     }
 
+    @Test func testParseOnlyReadsConfigurationSection() {
+        let text = """
+        [Common]
+        Rig=Some Other Rig
+        [Configuration]
+        CATSerialPort=/dev/cu.usbserial-ABCD12340
+        Rig=Yaesu FTX-1
+        [MultiSettings]
+        FT8\\Configuration\\CATSerialPort=/dev/cu.SLAB_USBtoUART
+        """
+        let c = WSJTXConfigFile.parse(text)
+        #expect(c.rig == "Yaesu FTX-1")
+        #expect(c.port == "/dev/cu.usbserial-ABCD12340")
+    }
+
+    @Test func testParseQuotedAndEscapedNames() {
+        // QSettings quotes values with commas or edge spaces, and escapes non-ASCII as \xHHHH.
+        let text = #"""
+        [Configuration]
+        SoundInName="USB Audio CODEC, 2ch"
+        SoundOutName=Ben\x2019s AirPods
+        Rig=@@odd
+        """#
+        let c = WSJTXConfigFile.parse(text)
+        #expect(c.soundIn == "USB Audio CODEC, 2ch")
+        #expect(c.soundOut == "Ben\u{2019}s AirPods")
+        #expect(c.rig == "@odd")
+    }
+
+    @Test func testQtEscapes() {
+        #expect(WSJTXConfigFile.decodeQtEscapes(#"a\tb\\c\"d"#) == "a\tb\\c\"d")
+        #expect(WSJTXConfigFile.decodeQtEscapes(#"\x41\x42\x43!"#) == "ABC!")
+        #expect(WSJTXConfigFile.decodeQtEscapes(#"\x42C"#) == "\u{42C}")  // hex is greedy, so Qt escapes a following C
+        #expect(WSJTXConfigFile.decodeQtEscapes(#"\101"#) == "A")         // octal
+    }
+
+    @Test func testRewriteOnlyTouchesConfigurationSection() {
+        let text = """
+        [MultiSettings]
+        CATSerialPort=/dev/other
+        [Configuration]
+        CATSerialPort=/dev/cu.SLAB_USBtoUART
+        CATSerialRate=4800
+        """
+        let out = WSJTXConfigFile.rewrite(text, ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 38400))
+        #expect(out.contains("[MultiSettings]\nCATSerialPort=/dev/other\n"))
+        #expect(WSJTXConfigFile.parse(out).port == "/dev/cu.usbserial-ABCD12340")
+    }
+
+    @Test func testRewriteAddsMissingKeys() {
+        let fix = ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 38400)
+        let text = "[Configuration]\nRig=Yaesu FTX-1\n\n[Other]\nX=1\n"
+        let out = WSJTXConfigFile.rewrite(text, fix)
+        #expect(out == "[Configuration]\nRig=Yaesu FTX-1\nCATSerialPort=/dev/cu.usbserial-ABCD12340\nCATSerialRate=38400\n\n[Other]\nX=1\n")
+
+        let noSection = WSJTXConfigFile.rewrite("[General]\nA=1\n", fix)
+        #expect(WSJTXConfigFile.parse(noSection).port == fix.port)
+        #expect(WSJTXConfigFile.parse(noSection).baud == 38400)
+    }
+
+    @Test func testApplyWritesBackupAndVerifies() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("WSJT-X.ini")
+        try ini.write(to: url, atomically: true, encoding: .utf8)
+        let backup = try WSJTXConfigFile.apply(ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 38400), to: url)
+        #expect(try String(contentsOf: backup, encoding: .utf8) == ini)
+        #expect(WSJTXConfigFile.load(from: url)?.baud == 38400)
+    }
+
     @Test func testLsofParse() {
         let h = PortHolders.parse("p17230\ncwsjtx\nf20\nn/dev/cu.SLAB_USBtoUART\n")
         #expect(h == ["/dev/cu.SLAB_USBtoUART": ["wsjtx"]])
     }
 
     @Test func testCATParse() {
-        #expect(CATProbe.parse("FA014074000;", prefix: "FA") == "014074000")
+        #expect(CATProbe.extract("FA014074000;", prefix: "FA") == "014074000")
+        #expect(CATProbe.extract("MD0C;", prefix: "MD0") == "C")
         #expect(CATProbe.modeName("C") == "DATA-U")
+    }
+
+    @Test func testCATParseToleratesNoiseAndAutoInfo() {
+        // Auto Information mode can push an FA update ahead of the reply we asked for.
+        #expect(CATProbe.extract("FA014074000;ID0840;", prefix: "ID") == "0840")
+        #expect(CATProbe.extract("\u{0}\u{FF}ID0840;", prefix: "ID") == "0840")
+        #expect(CATProbe.extract("ID08", prefix: "ID") == nil)        // incomplete
+        #expect(CATProbe.extract("FA014074000;", prefix: "ID") == nil)
     }
 }
 

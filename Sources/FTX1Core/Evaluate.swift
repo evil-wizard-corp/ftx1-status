@@ -47,10 +47,11 @@ public func evaluate(_ s: Snapshot) -> Report {
     // 4. WSJT-X configuration.
     var fix: ConfigFix?
     if let cfg = s.config {
-        checks.append(contentsOf: configChecks(cfg, s, knownBaud: knownBaud))
-        if let stable = s.stableCATPort, let baud = knownBaud,
-           cfg.port != stable.path || cfg.baud != baud {
-            fix = ConfigFix(port: stable.path, baud: baud)
+        let live: Bool
+        if case .ok = s.cat { live = true } else { live = false }
+        checks.append(contentsOf: configChecks(cfg, s, knownBaud: knownBaud, live: live))
+        if let port = suggestedPort(cfg, s), let baud = knownBaud, cfg.port != port || cfg.baud != baud {
+            fix = ConfigFix(port: port, baud: baud)
         }
     } else {
         checks.append(Check(title: "WSJT-X config", level: .info, detail: "WSJT-X.ini not found."))
@@ -62,7 +63,16 @@ public func evaluate(_ s: Snapshot) -> Report {
     return finish(checks, fix: fix)
 }
 
-func configChecks(_ cfg: WSJTXConfig, _ s: Snapshot, knownBaud: Int?) -> [Check] {
+/// The stable (usbserial-) CAT name if there is one; otherwise keep the configured port if it's
+/// already CAT, else any CAT name. Only the Silicon Labs driver's SLAB names exist on some Macs.
+func suggestedPort(_ cfg: WSJTXConfig, _ s: Snapshot) -> String? {
+    if let stable = s.stableCATPort { return stable.path }
+    if let current = s.catPorts.first(where: { $0.path == cfg.port }) { return current.path }
+    return s.catPorts.first?.path
+}
+
+/// `live` says `knownBaud` came from a probe just now rather than from the last good probe.
+func configChecks(_ cfg: WSJTXConfig, _ s: Snapshot, knownBaud: Int?, live: Bool = true) -> [Check] {
     var out: [Check] = []
 
     if let rig = cfg.rig, !rig.localizedCaseInsensitiveContains("FTX-1") {
@@ -76,9 +86,13 @@ func configChecks(_ cfg: WSJTXConfig, _ s: Snapshot, knownBaud: Int?) -> [Check]
             switch p.role {
             case .cat where p.hasStableName:
                 out.append(Check(title: "WSJT-X port", level: .ok, detail: "\(name) → CAT, stable name."))
-            case .cat:
+            case .cat where s.stableCATPort != nil:
                 out.append(Check(title: "WSJT-X port", level: .warn,
                                  detail: "\(name) is CAT right now, but SLAB names move between boots.\(stableHint)"))
+            case .cat:
+                // No usbserial- name to switch to, so there's nothing to fix; we'll flag it if the name moves.
+                out.append(Check(title: "WSJT-X port", level: .info,
+                                 detail: "\(name) → CAT. SLAB names can move between boots; this check will catch it."))
             case .ptt:
                 out.append(Check(title: "WSJT-X port", level: .error,
                                  detail: "\(name) is the PTT (Standard) port on this boot, not CAT.\(stableHint)"))
@@ -97,7 +111,10 @@ func configChecks(_ cfg: WSJTXConfig, _ s: Snapshot, knownBaud: Int?) -> [Check]
         if want == have {
             out.append(Check(title: "WSJT-X baud", level: .ok, detail: "\(have)"))
         } else {
-            out.append(Check(title: "WSJT-X baud", level: .error, detail: "WSJT-X uses \(have), radio answers at \(want)."))
+            // A remembered rate may be stale (the radio's CAT RATE was changed since), so only warn.
+            out.append(live
+                ? Check(title: "WSJT-X baud", level: .error, detail: "WSJT-X uses \(have), radio answers at \(want).")
+                : Check(title: "WSJT-X baud", level: .warn, detail: "WSJT-X uses \(have), radio last answered at \(want)."))
         }
     } else if let have = cfg.baud {
         out.append(Check(title: "WSJT-X baud", level: .info, detail: "\(have) (radio's rate not known yet)"))

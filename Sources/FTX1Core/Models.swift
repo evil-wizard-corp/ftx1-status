@@ -57,6 +57,18 @@ public enum CATResult: Equatable, Sendable {
     case noReply(triedBauds: [Int])
     case skipped(String)
     case openFailed(String)
+
+    /// One line for the diagnostics text.
+    public var summary: String {
+        switch self {
+        case .ok(let r):
+            let freq = r.frequencyHz.map { String(format: "%.6f MHz", Double($0) / 1e6) } ?? "frequency ?"
+            return "answered at \(r.baud) baud (ID \(r.radioID ?? "?"), \(freq), \(r.mode ?? "mode ?"))"
+        case .noReply(let tried): return "no reply at \(tried.map(String.init).joined(separator: "/"))"
+        case .skipped(let why): return "not probed: \(why)"
+        case .openFailed(let why): return "couldn't open port: \(why)"
+        }
+    }
 }
 
 public struct WSJTXConfig: Equatable, Sendable {
