@@ -8,16 +8,18 @@ struct FTX1StatusApp: App {
         MenuBarExtra {
             MenuView(model: model)
         } label: {
-            Image(nsImage: StatusIcon.image(for: model.report?.level))
+            Image(nsImage: StatusIcon.image(for: model.report))
         }
         .menuBarExtraStyle(.window)
     }
 }
 
 enum StatusIcon {
-    static func image(for level: Level?) -> NSImage {
-        let base = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "FTX-1 status")!
-        guard let level else { return templated(base) }
+    static func image(for report: Report?) -> NSImage {
+        let description = report.map { "FTX1 Status: \($0.headline)" } ?? "FTX1 Status"
+        let base = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: description)
+            ?? NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: description)!
+        guard let level = report?.level else { return templated(base) }
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             .applying(.init(paletteColors: [level.color]))
         let img = base.withSymbolConfiguration(config) ?? base
