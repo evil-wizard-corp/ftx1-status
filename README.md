@@ -27,3 +27,7 @@ When WSJT-X is pointed at a `SLAB_*` name, it will sometimes end up on the PTT p
 Running `.build/debug/FTX1Status --dump` prints the same diagnostics in the terminal.
 
 "Apply to WSJT-X.ini" rewrites `CATSerialPort` and `CATSerialRate`. It saves a timestamped backup first, and only runs while WSJT-X is closed, because WSJT-X overwrites the file when it quits.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
