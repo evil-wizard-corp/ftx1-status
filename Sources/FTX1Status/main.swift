@@ -26,12 +26,20 @@ if args.contains("--dump") {
     exit(0)
 }
 
-// One menu bar icon is enough. LaunchServices only dedupes a single copy of the app, so a second
-// copy (say ~/Applications from build-app.sh and /Applications from Homebrew) would otherwise run too.
-if let id = Bundle.main.bundleIdentifier,
-   NSRunningApplication.runningApplications(withBundleIdentifier: id)
-       .contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
-    exit(0)
+// One menu bar icon is enough. LaunchServices only dedupes a single copy of the app, so another
+// copy (an older version, or ~/Applications from build-app.sh next to /Applications from Homebrew)
+// could be running. The copy launched last wins: it's usually the one just installed.
+let ids = Set([Bundle.main.bundleIdentifier, StatusModel.legacyBundleID].compactMap { $0 })
+let others = ids.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+    .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+if !others.isEmpty {
+    others.forEach { $0.terminate() }
+    let deadline = Date().addingTimeInterval(3)
+    while others.contains(where: { !$0.isTerminated }), Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    }
+    // If an old copy won't quit, don't put a second icon next to it.
+    if others.contains(where: { !$0.isTerminated }) { exit(0) }
 }
 
 FTX1StatusApp.main()

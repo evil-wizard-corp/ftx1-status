@@ -35,7 +35,7 @@ Click the antenna icon in the menu bar to see each check, the radio's serial por
 
 - **Refresh** re-runs the checks now.
 - **Probe now** queries the radio even while WSJT-X is running. Use it when WSJT-X is open but can't connect. It still won't touch a port another app has open.
-- **Copy diagnostics** copies a text report for a bug report or a forum post.
+- **Copy diagnostics** copies a text report for a bug report or a forum post. It includes your radio's USB serial number and your audio device names, so look it over before posting it publicly.
 - **Apply to WSJT-X.ini** appears when the app knows a better port or baud rate. It rewrites `CATSerialPort` and `CATSerialRate` in the active configuration, and saves a timestamped backup (`WSJT-X.ini.bak-…`) next to the file first. It only runs while WSJT-X is closed, because WSJT-X overwrites the file when it quits.
 - **Launch at login** starts the app when you log in. macOS may ask you to allow it in System Settings → General → Login Items.
 
@@ -45,12 +45,14 @@ From a terminal, `"/Applications/FTX1 Status.app/Contents/MacOS/FTX1Status" --du
 
 Querying a serial port changes its baud rate for every app using it, so the app is careful about when it probes:
 
-- It never opens a port that another app has open.
-- It doesn't probe on its own while WSJT-X is running.
+- It never opens a port that another app has open, under either its `cu.*` or `tty.*` name. If it can't tell, it doesn't probe.
+- It doesn't probe on its own while WSJT-X is running. It checks again before each baud rate it tries, so it stops if WSJT-X starts mid-probe.
 - After a good reply it reuses the result for 60 seconds, and after a failure for 15 seconds, unless the radio's ports change.
 - It only ever opens the CAT (Enhanced) port, never the PTT (Standard) port.
 
-The app makes no network connections. The only file it writes is WSJT-X.ini, and only when you click Apply.
+The app makes no network connections. Besides its own preferences (the last baud rate that worked) and the login item, it writes only WSJT-X.ini and a backup next to it, and only when you click Apply.
+
+If WSJT-X talks to the radio through flrig or Hamlib's rigctld, the app expects that program to have the CAT port open and skips the serial port and baud checks.
 
 ## Build from source
 

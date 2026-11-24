@@ -19,7 +19,10 @@ enum StatusIcon {
         let description = report.map { "FTX1 Status: \($0.headline)" } ?? "FTX1 Status"
         let base = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: description)
             ?? NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: description)!
-        guard let level = report?.level else { return templated(base) }
+        // Plain (template) icon while loading or while the radio is off: an off radio is normal
+        // for a login item, and a red icon all evening would just be noise.
+        guard let report, report.radioConnected else { return templated(base) }
+        let level = report.level
         let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
             .applying(.init(paletteColors: [level.color]))
         let img = base.withSymbolConfiguration(config) ?? base

@@ -6,7 +6,8 @@ struct EvaluateTests {
     // Port layout observed 2026-11-22: SLAB names landed in reverse order.
     func radioPorts() -> [SerialPort] {
         func p(_ path: String, _ driver: String, _ iface: Int) -> SerialPort {
-            SerialPort(path: path, driver: driver, interfaceNumber: iface, usbSerial: "ABCD1234",
+            SerialPort(path: path, dialinPath: path.replacingOccurrences(of: "/dev/cu.", with: "/dev/tty."),
+                       driver: driver, interfaceNumber: iface, usbSerial: "ABCD1234",
                        vendorID: radioBridgeVendorID, productID: radioBridgeProductID)
         }
         return [
@@ -60,7 +61,7 @@ struct EvaluateTests {
     @Test func testRadioOff() {
         let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 38400, cat: .skipped("none"), ports: []))
         #expect(r.level == .error)
-        #expect(r.headline.contains("No CP2105"))
+        #expect(r.headline.contains("no CP2105"))
     }
 
     @Test func testOtherAppHoldingCATPort() {
@@ -92,11 +93,62 @@ struct EvaluateTests {
     }
 
     @Test func testRememberedBaudMismatchIsOnlyAWarning() {
+        // WSJT-X is running but hasn't opened the port, so we only have the remembered rate.
+        let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 4800,
+                              cat: .skipped("WSJT-X is running")).with(lastGoodBaud: 38400))
+        #expect(check(r, "WSJT-X baud")?.level == .warn)
+        #expect(check(r, "WSJT-X baud")!.detail.contains("last answered"))
+        #expect(r.suggestedFix == nil)  // never write a remembered rate over WSJT-X's
+    }
+
+    @Test func testWSJTXHoldingPortTrustsItsBaud() {
+        // WSJT-X is connected at 4800; a stale remembered 38400 mustn't keep the icon yellow.
         let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 4800,
                               holders: ["/dev/cu.usbserial-ABCD12340": ["wsjtx"]],
                               cat: .skipped("in use")).with(lastGoodBaud: 38400))
-        #expect(check(r, "WSJT-X baud")?.level == .warn)
-        #expect(check(r, "WSJT-X baud")!.detail.contains("last answered"))
+        #expect(check(r, "WSJT-X baud")?.level == .info)
+        #expect(r.level <= .info)
+        #expect(r.suggestedFix == nil)
+    }
+
+    @Test func testFixKeepsConfiguredBaudWhenNotLive() {
+        // rigctld holds the port, so no probe; WSJT-X is on a SLAB name at 4800, remembered rate 38400.
+        let r = evaluate(snap(port: "/dev/cu.SLAB_USBtoUART5", baud: 4800,
+                              holders: ["/dev/cu.usbserial-ABCD12340": ["rigctld"]], running: false,
+                              cat: .skipped("in use")).with(lastGoodBaud: 38400))
+        #expect(r.suggestedFix == ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 4800))
+    }
+
+    @Test func testTTYNameIsTheSamePort() {
+        let tty = "/dev/tty.usbserial-ABCD12340"
+        let r = evaluate(snap(port: tty, baud: 38400, holders: [tty: ["wsjtx"]]))
+        #expect(check(r, "WSJT-X port")?.level == .ok)
+        #expect(check(r, "WSJT-X link")?.level == .ok)
+        #expect(r.suggestedFix == nil)
+    }
+
+    @Test func testTTYHolderCountsAsCATHolder() {
+        let s = snap(port: "/dev/cu.usbserial-ABCD12340", baud: 38400,
+                     holders: ["/dev/tty.SLAB_USBtoUART5": ["flrig"]])
+        #expect(s.catHolders == ["flrig"])
+    }
+
+    @Test func testRigServerSetupIsFine() {
+        var s = snap(port: "", baud: 4800, holders: ["/dev/cu.usbserial-ABCD12340": ["flrig"]],
+                     cat: .skipped("in use by flrig"))
+        s.config?.rig = "FLRig FLRig"
+        s.config?.port = nil
+        let r = evaluate(s.with(lastGoodBaud: 38400))
+        #expect(r.level <= .info, "\(r.checks)")
+        #expect(check(r, "WSJT-X link")?.level == .ok)
+        #expect(check(r, "WSJT-X port") == nil)
+        #expect(r.suggestedFix == nil)
+    }
+
+    @Test func testRadioOffIsMarkedDisconnected() {
+        let r = evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 38400, cat: .skipped("none"), ports: []))
+        #expect(!r.radioConnected)
+        #expect(evaluate(snap(port: "/dev/cu.usbserial-ABCD12340", baud: 38400)).radioConnected)
     }
 
     @Test func testNoCATReply() {
@@ -203,6 +255,24 @@ struct ParsingTests {
         let backup = try WSJTXConfigFile.apply(ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 38400), to: url)
         #expect(try String(contentsOf: backup, encoding: .utf8) == ini)
         #expect(WSJTXConfigFile.load(from: url)?.baud == 38400)
+    }
+
+    @Test func testApplyKeepsPermissions() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("WSJT-X.ini")
+        try ini.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try WSJTXConfigFile.apply(ConfigFix(port: "/dev/cu.usbserial-ABCD12340", baud: 38400), to: url)
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+    }
+
+    @Test func testProbeStopsBeforeOpening() {
+        // The stop check runs before each baud, so nothing is opened (the path doesn't even exist).
+        let r = CATProbe.run(path: "/dev/cu.does-not-exist", preferred: nil, stopReason: { "WSJT-X started" })
+        #expect(r == .skipped("WSJT-X started"))
     }
 
     @Test func testLsofParse() {

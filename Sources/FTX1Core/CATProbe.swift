@@ -4,11 +4,14 @@ public enum CATProbe {
     public static let candidateBauds = [38400, 4800, 9600, 19200, 115200]
 
     /// Read-only CAT queries (ID, FA, MD0). Tries `preferred` first, then the rest.
-    public static func run(path: String, preferred: Int?) -> CATResult {
+    /// `stopReason` runs before each baud; returning a reason stops the probe (say, WSJT-X just
+    /// started and is about to open the port), and the result is `.skipped(reason)`.
+    public static func run(path: String, preferred: Int?, stopReason: () -> String? = { nil }) -> CATResult {
         var order = candidateBauds
         if let p = preferred { order.removeAll { $0 == p }; order.insert(p, at: 0) }
         var tried: [Int] = []
         for baud in order {
+            if let why = stopReason() { return .skipped(why) }
             tried.append(baud)
             switch query(path: path, baud: baud) {
             case .failure(let f): return .openFailed(f.message)
@@ -33,7 +36,9 @@ public enum CATProbe {
         tcflush(fd, TCIOFLUSH)
 
         // Yaesu IDs are four digits; anything else is line noise at the wrong baud.
-        guard let id = send(fd, "ID;", expect: "ID"), id.count == 4, id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber)
+        // The leading ";" ends any half-command left in the radio's buffer by bytes sent at a wrong baud,
+        // so the ID query isn't read as "<junk>ID;". The radio may answer it with "?;", which is ignored.
+        guard let id = send(fd, ";ID;", expect: "ID"), id.count == 4, id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber)
         else { return .success(nil) }
         let fa = send(fd, "FA;", expect: "FA")
         let md = send(fd, "MD0;", expect: "MD0")
