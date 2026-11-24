@@ -18,6 +18,7 @@ public enum SerialPorts {
             guard let path = prop(svc, kIOCalloutDeviceKey) as? String else { continue }
             ports.append(SerialPort(
                 path: path,
+                dialinPath: prop(svc, kIODialinDeviceKey) as? String,
                 driver: driverName(svc),
                 interfaceNumber: (search(svc, "bInterfaceNumber") as? NSNumber)?.intValue,
                 interfaceName: search(svc, "kUSBString") as? String,

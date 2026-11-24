@@ -82,7 +82,7 @@ struct MenuView: View {
                     Text(p.role.map { $0 == .cat ? "CAT" : "PTT" } ?? "?").font(.caption2.bold())
                         .foregroundStyle(p.role == .cat ? .green : .secondary)
                     Text(p.driver).font(.caption2).foregroundStyle(.secondary)
-                    if let h = s.holders[p.path] {
+                    if case let h = s.holders(of: p), !h.isEmpty {
                         Text("← \(h.joined(separator: ","))").font(.caption2).foregroundStyle(.orange)
                     }
                 }

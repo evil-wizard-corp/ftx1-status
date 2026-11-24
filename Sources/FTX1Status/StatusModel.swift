@@ -18,7 +18,15 @@ final class StatusModel: ObservableObject {
 
     nonisolated static var appVersion: String? { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String }
 
+    /// Bundle ID of 0.3.0 and earlier, before it became io.github.evil-wizard-corp.ftx1status.
+    nonisolated static let legacyBundleID = "local.ftx1status"
+
     init() {
+        // Carry the remembered baud over from the old bundle ID's preferences.
+        if UserDefaults.standard.object(forKey: baudKey) == nil, Bundle.main.bundleIdentifier != Self.legacyBundleID,
+           let old = UserDefaults(suiteName: Self.legacyBundleID)?.object(forKey: baudKey) as? Int {
+            UserDefaults.standard.set(old, forKey: baudKey)
+        }
         refresh()
         let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -76,18 +84,23 @@ final class StatusModel: ObservableObject {
 
     /// Probing a tty changes its baud for everyone (termios is per-device), and two readers split the
     /// reply bytes, so a probe can break WSJT-X's own CAT session. Rules:
-    ///  - never probe a port someone holds open;
-    ///  - never auto-probe while WSJT-X is running (checked again right before opening);
+    ///  - never probe a port someone holds open, or when we couldn't find out (lsof failed);
+    ///  - never auto-probe while WSJT-X is running, re-checked before each baud;
     ///  - reuse the last probe for a while (see `reuseInterval`) unless the radio's ports change.
     nonisolated static func collect(lastGoodBaud: Int?, wsjtxRunning: Bool, forceProbe: Bool = false,
                                     previous: Probe? = nil) -> (snapshot: Snapshot, probed: CATResult?) {
         let ports = SerialPorts.enumerate()
         let config = WSJTXConfigFile.load()
-        var paths = Set(ports.filter(\.isRadioBridge).map(\.path))
-        if let p = config?.port { paths.insert(p) }
-        let holders = PortHolders.find(paths: Array(paths).sorted())
+        let radio = ports.filter(\.isRadioBridge)
+        // Without the radio there's nothing to probe or protect, so skip lsof entirely.
+        var holders: [String: [String]]? = [:]
+        if !radio.isEmpty {
+            var paths = Set(radio.flatMap(\.allPaths))
+            if let p = config?.port { paths.insert(p) }
+            holders = PortHolders.find(paths: Array(paths).sorted())
+        }
 
-        var snap = Snapshot(ports: ports, holders: holders, wsjtxRunning: wsjtxRunning, config: config,
+        var snap = Snapshot(ports: ports, holders: holders ?? [:], wsjtxRunning: wsjtxRunning, config: config,
                             cat: .skipped("Radio not found."), lastGoodBaud: lastGoodBaud,
                             audioDevices: AudioDevices.names())
         guard let target = snap.stableCATPort ?? snap.catPorts.first else {
@@ -97,20 +110,27 @@ final class StatusModel: ObservableObject {
 
         let held = snap.catHolders
         let known = lastGoodBaud.map { " Last known rate: \($0)." } ?? ""
+        if holders == nil {
+            snap.cat = .skipped("Couldn't check which apps have the CAT port open, so not probing.")
+            return (snap, nil)
+        }
         if !held.isEmpty {
             snap.cat = .skipped("CAT port in use by \(held.joined(separator: ", ")); not probing.")
+            return (snap, nil)
+        }
+        // Reuse a recent result first, so a "Probe now" answer stays up while WSJT-X runs.
+        if !forceProbe, let prev = previous, Date().timeIntervalSince(prev.at) < reuseInterval(for: prev.result),
+           prev.ports == snap.radioPorts.map(\.path) {
+            snap.cat = prev.result
             return (snap, nil)
         }
         if !forceProbe && (wsjtxRunning || isWSJTXRunning()) {
             snap.cat = .skipped("WSJT-X is running, so not probing (avoids colliding with it).\(known)")
             return (snap, nil)
         }
-        if !forceProbe, let prev = previous, Date().timeIntervalSince(prev.at) < reuseInterval(for: prev.result),
-           prev.ports == snap.radioPorts.map(\.path) {
-            snap.cat = prev.result
-            return (snap, nil)
-        }
-        let result = CATProbe.run(path: target.path, preferred: lastGoodBaud)
+        let result = CATProbe.run(path: target.path, preferred: lastGoodBaud, stopReason: {
+            !forceProbe && isWSJTXRunning() ? "WSJT-X started, so stopped probing.\(known)" : nil
+        })
         snap.cat = result
         return (snap, result)
     }

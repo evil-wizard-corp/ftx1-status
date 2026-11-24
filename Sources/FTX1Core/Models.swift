@@ -12,7 +12,10 @@ public let radioBridgeProductID = 0xEA70
 public enum PortRole: String, Sendable { case cat = "CAT (Enhanced)", ptt = "PTT (Standard)" }
 
 public struct SerialPort: Equatable, Sendable {
+    /// The callout device (/dev/cu.*), which is what WSJT-X should use.
     public var path: String
+    /// The dial-in device (/dev/tty.*) for the same UART. Some apps list and open this name instead.
+    public var dialinPath: String?
     public var driver: String
     public var interfaceNumber: Int?
     public var interfaceName: String?
@@ -21,9 +24,10 @@ public struct SerialPort: Equatable, Sendable {
     public var vendorID: Int?
     public var productID: Int?
 
-    public init(path: String, driver: String, interfaceNumber: Int? = nil, interfaceName: String? = nil,
-                usbProduct: String? = nil, usbSerial: String? = nil, vendorID: Int? = nil, productID: Int? = nil) {
-        self.path = path; self.driver = driver; self.interfaceNumber = interfaceNumber
+    public init(path: String, dialinPath: String? = nil, driver: String, interfaceNumber: Int? = nil,
+                interfaceName: String? = nil, usbProduct: String? = nil, usbSerial: String? = nil,
+                vendorID: Int? = nil, productID: Int? = nil) {
+        self.path = path; self.dialinPath = dialinPath; self.driver = driver; self.interfaceNumber = interfaceNumber
         self.interfaceName = interfaceName; self.usbProduct = usbProduct; self.usbSerial = usbSerial
         self.vendorID = vendorID; self.productID = productID
     }
@@ -40,6 +44,10 @@ public struct SerialPort: Equatable, Sendable {
     public var hasStableName: Bool { path.contains("usbserial-") }
 
     public var displayName: String { (path as NSString).lastPathComponent }
+
+    /// Both device names for this UART.
+    public var allPaths: [String] { [path] + (dialinPath.map { [$0] } ?? []) }
+    public func matches(_ devicePath: String) -> Bool { allPaths.contains(devicePath) }
 }
 
 public struct CATReading: Equatable, Sendable {
@@ -83,6 +91,13 @@ public struct WSJTXConfig: Equatable, Sendable {
         self.rig = rig; self.port = port; self.baud = baud; self.pttMethod = pttMethod
         self.soundIn = soundIn; self.soundOut = soundOut
     }
+
+    /// WSJT-X can reach the radio through flrig or a Hamlib rigctld server instead of a serial port.
+    /// Then that server holds the CAT port, and CATSerialPort/CATSerialRate don't matter.
+    public var usesRigServer: Bool {
+        guard let rig = rig?.lowercased() else { return false }
+        return rig.contains("flrig") || rig.contains("net rigctl")
+    }
 }
 
 public struct Snapshot: Sendable {
@@ -105,11 +120,17 @@ public struct Snapshot: Sendable {
     public var radioPorts: [SerialPort] { ports.filter(\.isRadioBridge) }
     public var catPorts: [SerialPort] { radioPorts.filter { $0.role == .cat } }
     public var stableCATPort: SerialPort? { catPorts.first(where: \.hasStableName) }
-    public func port(at path: String) -> SerialPort? { ports.first { $0.path == path } }
+    /// The port with this cu.* or tty.* name.
+    public func port(at path: String) -> SerialPort? { ports.first { $0.matches(path) } }
+
+    /// Processes holding either of a port's device names.
+    public func holders(of port: SerialPort) -> [String] {
+        Array(Set(port.allPaths.flatMap { holders[$0] ?? [] })).sorted()
+    }
 
     /// Every process holding any device name that maps to the CAT interface.
     public var catHolders: [String] {
-        Array(Set(catPorts.flatMap { holders[$0.path] ?? [] })).sorted()
+        Array(Set(catPorts.flatMap { holders(of: $0) })).sorted()
     }
 }
 
@@ -126,6 +147,8 @@ public struct ConfigFix: Equatable, Sendable {
 }
 
 public struct Report: Sendable {
+    /// False when the radio isn't on USB, which is normal when it's switched off.
+    public var radioConnected: Bool = true
     public var level: Level
     public var headline: String
     public var checks: [Check]

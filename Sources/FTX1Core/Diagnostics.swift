@@ -10,7 +10,8 @@ public func diagnosticsText(_ s: Snapshot, _ r: Report, appVersion: String? = ni
     out += ["", "Serial ports:"]
     for p in s.ports {
         let role = p.role?.rawValue ?? "-"
-        let held = s.holders[p.path].map { " held by \($0.joined(separator: ","))" } ?? ""
+        let h = s.holders(of: p)
+        let held = h.isEmpty ? "" : " held by \(h.joined(separator: ","))"
         out.append("  \(p.path)  role=\(role) driver=\(p.driver) usb=\(p.usbProduct ?? "-")\(held)")
     }
     if let c = s.config {

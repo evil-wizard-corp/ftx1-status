@@ -124,7 +124,12 @@ public enum WSJTXConfigFile {
         let backup = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).bak-\(stamp)")
         try data.write(to: backup)
         let updated = rewrite(original, fix)
+        // An atomic write makes a new file, so carry the original's permissions over.
+        let permissions = try? FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
         try updated.write(to: url, atomically: true, encoding: .utf8)
+        if let permissions {
+            try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: url.path)
+        }
         let check = parse(updated)
         guard check.port == fix.port, check.baud == fix.baud else { throw ApplyError.notApplied }
         return backup
