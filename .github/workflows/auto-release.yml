@@ -1,0 +1,52 @@
+name: Auto release
+# On every push to main, works out the next version from the conventional commits since the last
+# stable tag (see scripts/next-version.sh) and, if there is one, releases it. docs/ci/chore/...
+# commits alone don't release. Run it by hand to force a bump.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Release at least this bump, even if the commits don't call for one
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+# One release at a time, so two quick merges can't both claim the same version.
+concurrency:
+  group: release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          VERSION="$(scripts/next-version.sh $BUMP)"
+          if [[ -z "$VERSION" ]]; then
+            echo "No feat/fix/perf/breaking commits since the last release; nothing to do."
+          elif git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "v$VERSION already exists; nothing to do."
+          else
+            echo "Releasing v$VERSION"
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    secrets: inherit
