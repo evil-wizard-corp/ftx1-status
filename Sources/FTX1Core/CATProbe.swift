@@ -32,19 +32,23 @@ public enum CATProbe {
         guard tcsetattr(fd, TCSANOW, &t) == 0 else { return .failure(Failure("tcsetattr: \(String(cString: strerror(errno)))")) }
         tcflush(fd, TCIOFLUSH)
 
-        guard let id = send(fd, "ID;"), id.hasPrefix("ID") else { return .success(nil) }
-        let fa = send(fd, "FA;")
-        let md = send(fd, "MD0;")
+        // Yaesu IDs are four digits; anything else is line noise at the wrong baud.
+        guard let id = send(fd, "ID;", expect: "ID"), id.count == 4, id.allSatisfy(\.isASCII), id.allSatisfy(\.isNumber)
+        else { return .success(nil) }
+        let fa = send(fd, "FA;", expect: "FA")
+        let md = send(fd, "MD0;", expect: "MD0")
         return .success(CATReading(
             baud: baud,
-            radioID: parse(id, prefix: "ID"),
-            frequencyHz: fa.flatMap { parse($0, prefix: "FA") }.flatMap { Int($0) },
-            mode: md.flatMap { parse($0, prefix: "MD0") }.map(modeName)
+            radioID: id,
+            frequencyHz: fa.flatMap { Int($0) },
+            mode: md.map(modeName)
         ))
     }
 
-    private static func send(_ fd: Int32, _ cmd: String, timeout: TimeInterval = 0.4) -> String? {
-        _ = cmd.withCString { write(fd, $0, strlen($0)) }
+    /// Sends `cmd` and waits for a reply starting with `expect`; returns the reply's payload.
+    private static func send(_ fd: Int32, _ cmd: String, expect: String, timeout: TimeInterval = 0.4) -> String? {
+        let bytes = Array(cmd.utf8)
+        guard write(fd, bytes, bytes.count) == bytes.count else { return nil }
         var buf = [UInt8](), chunk = [UInt8](repeating: 0, count: 64)
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -52,15 +56,24 @@ public enum CATProbe {
             guard poll(&pfd, 1, 50) > 0 else { continue }
             let n = read(fd, &chunk, chunk.count)
             if n > 0 { buf += chunk[0..<n] }
-            if buf.last == UInt8(ascii: ";") { break }
+            if buf.last == UInt8(ascii: ";"), let reply = extract(String(decoding: buf, as: UTF8.self), prefix: expect) {
+                return reply
+            }
         }
-        guard !buf.isEmpty else { return nil }
-        return String(decoding: buf, as: UTF8.self)
+        return nil
     }
 
-    static func parse(_ reply: String, prefix: String) -> String? {
-        guard reply.hasPrefix(prefix), reply.hasSuffix(";") else { return nil }
-        return String(reply.dropFirst(prefix.count).dropLast())
+    /// Finds the first complete `<prefix>...;` reply in `raw` and returns what follows the prefix.
+    /// Tolerates other replies in the stream (the radio's Auto Information mode sends unsolicited
+    /// FA/MD updates) and line noise in front of a reply.
+    static func extract(_ raw: String, prefix: String) -> String? {
+        var tokens = raw.split(separator: ";", omittingEmptySubsequences: false)
+        tokens.removeLast()  // text after the last ';' is incomplete
+        for token in tokens {
+            let t = token.drop { !($0.isASCII && ($0.isLetter || $0.isNumber)) }
+            if t.hasPrefix(prefix) { return String(t.dropFirst(prefix.count)) }
+        }
+        return nil
     }
 
     /// Yaesu mode codes (FTDX10/FTX-1 family).

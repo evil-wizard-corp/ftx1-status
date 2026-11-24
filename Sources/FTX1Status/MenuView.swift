@@ -1,6 +1,5 @@
 import SwiftUI
 import FTX1Core
-import ServiceManagement
 
 struct MenuView: View {
     @ObservedObject var model: StatusModel
@@ -32,7 +31,8 @@ struct MenuView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 8) {
-            let level = model.report?.level ?? .info
+            // "Info" checks are fine (e.g. WSJT-X not running), so the header shows a plain checkmark.
+            let level = model.report.map { $0.level <= .info ? .ok : $0.level } ?? .info
             Image(systemName: level.symbol).foregroundStyle(level.swiftUIColor).font(.title2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("FTX-1 Status").font(.headline)
@@ -79,7 +79,7 @@ struct MenuView: View {
                     Text(p.displayName).font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                     Spacer()
-                    Text(p.role == .cat ? "CAT" : "PTT").font(.caption2.bold())
+                    Text(p.role.map { $0 == .cat ? "CAT" : "PTT" } ?? "?").font(.caption2.bold())
                         .foregroundStyle(p.role == .cat ? .green : .secondary)
                     Text(p.driver).font(.caption2).foregroundStyle(.secondary)
                     if let h = s.holders[p.path] {
@@ -111,11 +111,8 @@ struct MenuView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             Toggle("Launch at login", isOn: Binding(
-                get: { SMAppService.mainApp.status == .enabled },
-                set: { on in
-                    do { on ? try SMAppService.mainApp.register() : try SMAppService.mainApp.unregister() }
-                    catch { model.message = "Launch at login: \(error.localizedDescription)" }
-                }
+                get: { model.launchAtLogin },
+                set: { model.setLaunchAtLogin($0) }
             )).font(.caption).toggleStyle(.checkbox)
             buttons
         }

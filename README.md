@@ -1,6 +1,8 @@
 # FTX1 Status
 
-A macOS menu bar app that checks why WSJT-X can't reach a Yaesu FTX-1, refreshing every 5 seconds.
+A macOS menu bar app that checks why WSJT-X can't reach a Yaesu FTX-1. It refreshes every 5 seconds, and the menu bar icon turns green, yellow, or red.
+
+Requires macOS 14 (Sonoma) or later and an FTX-1 connected over USB.
 
 ## What it checks
 
@@ -12,12 +14,12 @@ A macOS menu bar app that checks why WSJT-X can't reach a Yaesu FTX-1, refreshin
 
 ## Why the port keeps "disappearing"
 
-The CP2105 has two serial ports, and two drivers attach to both of them:
+The CP2105 has two serial ports, and two drivers can attach to both of them:
 
 - **Apple's driver** names them `cu.usbserial-<USB serial number><n>`. These names stay the same across reboots.
-- **The Silicon Labs driver** names them `cu.SLAB_USBtoUART`, `cu.SLAB_USBtoUART5`, and so on, in enumeration order. That order changes with power-on order.
+- **The Silicon Labs driver** names them `cu.SLAB_USBtoUART`, `cu.SLAB_USBtoUART5`, and so on, in enumeration order. That order can change with power-on order.
 
-When WSJT-X is pointed at a `SLAB_*` name, it will sometimes end up on the PTT port. Use `/dev/cu.usbserial-…0` at the radio's CAT rate (38400 on this rig).
+When WSJT-X is pointed at a `SLAB_*` name, it will sometimes end up on the PTT port. Use `/dev/cu.usbserial-…0` at the radio's CAT RATE. The menu shows the rate the radio answered at.
 
 ## Install
 
@@ -25,10 +27,37 @@ When WSJT-X is pointed at a `SLAB_*` name, it will sometimes end up on the PTT p
 
 Or download the zip from [Releases](https://github.com/evil-wizard-corp/ftx1-status/releases). The app isn't notarized, because there's no paid Apple Developer account. The Homebrew cask clears the quarantine flag for you. If you install from the zip and macOS blocks the app, run `xattr -dr com.apple.quarantine "/Applications/FTX1 Status.app"`, or use System Settings → Privacy & Security → Open Anyway.
 
+## Using it
+
+Click the antenna icon in the menu bar to see each check, the radio's serial ports, and the WSJT-X settings it found.
+
+- **Refresh** re-runs the checks now.
+- **Probe now** queries the radio even while WSJT-X is running. Use it when WSJT-X is open but can't connect. It still won't touch a port another app has open.
+- **Copy diagnostics** copies a text report for a bug report or a forum post.
+- **Apply to WSJT-X.ini** appears when the app knows a better port or baud rate. It rewrites `CATSerialPort` and `CATSerialRate` in the active configuration, and saves a timestamped backup (`WSJT-X.ini.bak-…`) next to the file first. It only runs while WSJT-X is closed, because WSJT-X overwrites the file when it quits.
+- **Launch at login** starts the app when you log in. macOS may ask you to allow it in System Settings → General → Login Items.
+
+From a terminal, `"/Applications/FTX1 Status.app/Contents/MacOS/FTX1Status" --dump` prints the same diagnostics and exits.
+
+### How it stays out of WSJT-X's way
+
+Querying a serial port changes its baud rate for every app using it, so the app is careful about when it probes:
+
+- It never opens a port that another app has open.
+- It doesn't probe on its own while WSJT-X is running.
+- After a good reply it reuses the result for 60 seconds, and after a failure for 15 seconds, unless the radio's ports change.
+- It only ever opens the CAT (Enhanced) port, never the PTT (Standard) port.
+
+The app makes no network connections. The only file it writes is WSJT-X.ini, and only when you click Apply.
+
 ## Build from source
 
+You need Xcode, or the Xcode Command Line Tools for building only.
+
     ./build-app.sh --install   # builds build/FTX1 Status.app and copies it to ~/Applications
-    swift test                 # evaluation, parsing, and lsof tests
+    swift test                 # evaluation, parsing, and lsof tests (needs Xcode)
+
+`swift run FTX1Status --dump` prints the diagnostics from a source checkout.
 
 ## Releasing
 
@@ -40,10 +69,6 @@ Push a tag like `v0.2.0`. The release workflow:
 4. bumps the cask in [evil-wizard-corp/homebrew-tap](https://github.com/evil-wizard-corp/homebrew-tap)
 
 Tags with a hyphen, like `v0.2.0-beta.1`, become pre-releases and skip the cask bump.
-
-Running `.build/debug/FTX1Status --dump` prints the same diagnostics in the terminal.
-
-"Apply to WSJT-X.ini" rewrites `CATSerialPort` and `CATSerialRate`. It saves a timestamped backup first, and only runs while WSJT-X is closed, because WSJT-X overwrites the file when it quits.
 
 ## License
 
