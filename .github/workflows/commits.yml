@@ -1,0 +1,24 @@
+name: Conventional commits
+# Releases are versioned from commit messages (see auto-release.yml), so every commit in a PR
+# needs a conventional subject. The PR title is checked too, because a squash merge uses it.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Commit subjects
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: scripts/lint-commits.sh "$BASE" "$HEAD"
+      - name: PR title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/lint-commits.sh --subject "$TITLE"
