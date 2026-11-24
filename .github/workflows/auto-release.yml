@@ -20,6 +20,8 @@ permissions:
   contents: read
 jobs:
   version:
+    # A manual run from another branch would tag a commit main can't reach.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.next.outputs.tag }}

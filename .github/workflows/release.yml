@@ -42,6 +42,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Re-running a failed job (say the tap step) must not trip over the release it already made.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists; replacing its zip with this build."
+            gh release upload "$TAG" "$ZIP" --clobber
+            exit 0
+          fi
           PRERELEASE=""
           [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
           gh release create "$TAG" "$ZIP" $PRERELEASE --target "$(git rev-parse HEAD)" --title "FTX1 Status $VERSION" --generate-notes --notes "$(cat <<NOTES
