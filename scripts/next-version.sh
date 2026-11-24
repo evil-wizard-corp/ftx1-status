@@ -29,7 +29,7 @@ while IFS= read -r -d $'\0' commit; do
   elif [[ "$subject" =~ ^(fix|perf)(\([^\)]*\))?: ]]; then
     bump 1
   fi
-done < <(git log --no-merges --format='%B%x00' "$RANGE")
+done < <(git log -z --no-merges --format='%B' "$RANGE")  # -z: NUL between commits, no stray newline
 
 case "$FORCE" in
   patch) bump 1 ;; minor) bump 2 ;; major) bump 3 ;; "") ;;
