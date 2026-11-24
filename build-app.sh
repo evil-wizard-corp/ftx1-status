@@ -7,6 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 VERSION="${VERSION:-0.0.0-dev}"
+# CFBundleVersion must be numeric (1.2.3), so drop any pre-release suffix like -beta.1.
+BUILD_NUMBER="${VERSION%%-*}"
 ARCH_FLAGS=()
 [[ "${UNIVERSAL:-0}" == "1" ]] && ARCH_FLAGS=(--arch arm64 --arch x86_64)
 
@@ -23,14 +25,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>FTX1 Status</string>
+  <key>CFBundleDisplayName</key><string>FTX1 Status</string>
   <key>CFBundleIdentifier</key><string>local.ftx1status</string>
   <key>CFBundleExecutable</key><string>FTX1Status</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Ben Mikiten. MIT License.</string>
 </dict>
 </plist>
 PLIST

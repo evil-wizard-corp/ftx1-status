@@ -2,18 +2,22 @@ import Foundation
 import CoreAudio
 
 public enum PortHolders {
-    /// path -> process names, via lsof.
-    public static func find(paths: [String]) -> [String: [String]] {
+    /// path -> process names, via lsof. Gives up after `timeout` so a stuck lsof can't stall polling.
+    public static func find(paths: [String], timeout: TimeInterval = 5) -> [String: [String]] {
         guard !paths.isEmpty else { return [:] }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        p.arguments = ["-F", "cn", "--"] + paths
+        // -w: no warnings for missing paths; -S 2: lsof's own timeout for blocking kernel calls.
+        p.arguments = ["-w", "-S", "2", "-F", "cn", "--"] + paths
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return [:] }
+        let watchdog = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
+        watchdog.cancel()
         return parse(String(decoding: data, as: UTF8.self))
     }
 
