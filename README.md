@@ -61,14 +61,25 @@ You need Xcode, or the Xcode Command Line Tools for building only.
 
 ## Releasing
 
-Push a tag like `v0.2.0`. The release workflow:
+Releases are automatic. Every commit needs a [conventional commit](https://www.conventionalcommits.org/) subject, and a check on each PR enforces this, for both the commits and the PR title. When something lands on `main`, the Auto release workflow works out the next version from the commits since the last release:
+
+| Commit | Release |
+| --- | --- |
+| `fix: …`, `perf: …` | patch (0.2.0 → 0.2.1) |
+| `feat: …` | minor (0.2.0 → 0.3.0) |
+| `feat!: …`, or a `BREAKING CHANGE:` footer | major (minor before 1.0) |
+| `docs:`, `ci:`, `chore:`, `refactor:`, `test:`, `build:`, `style:`, `revert:` | none |
+
+The release workflow then:
 
 1. runs the tests
 2. builds a universal (arm64 + x86_64) app
-3. creates a GitHub release with the zip attached
+3. tags the commit and creates a GitHub release with the zip attached
 4. bumps the cask in [evil-wizard-corp/homebrew-tap](https://github.com/evil-wizard-corp/homebrew-tap)
 
-Tags with a hyphen, like `v0.2.0-beta.1`, become pre-releases and skip the cask bump.
+To release when the commits don't call for one, run **Auto release** from the Actions tab and pick a bump. To ship a pre-release, push a tag with a hyphen by hand, like `git tag v0.3.0-beta.1 && git push origin v0.3.0-beta.1`. Pre-releases skip the cask bump, and the version math ignores them.
+
+`scripts/next-version.sh` prints the version the next release would get.
 
 ## License
 
