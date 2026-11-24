@@ -1,12 +1,23 @@
 name: Release
+# Runs when you push a v* tag by hand (for example a v0.3.0-beta.1 pre-release), and when
+# auto-release.yml calls it with the next version. In the second case the tag doesn't exist yet;
+# `gh release create` makes it at the checked-out commit.
 on:
   push:
     tags: ['v*']
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to release, like v1.2.3
+        required: true
+        type: string
 permissions:
   contents: write
 jobs:
   release:
     runs-on: macos-15
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
 
@@ -14,10 +25,11 @@ jobs:
 
       - name: Build universal app
         run: |
-          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-          VERSION="${GITHUB_REF_NAME#v}" UNIVERSAL=1 ./build-app.sh
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad tag $TAG"; exit 1; }
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          VERSION="${TAG#v}" UNIVERSAL=1 ./build-app.sh
           lipo -info "build/FTX1 Status.app/Contents/MacOS/FTX1Status"
-          "build/FTX1 Status.app/Contents/MacOS/FTX1Status" --version | grep -qx "${GITHUB_REF_NAME#v}"
+          "build/FTX1 Status.app/Contents/MacOS/FTX1Status" --version | grep -qx "${TAG#v}"
 
       - name: Zip
         run: |
@@ -32,7 +44,7 @@ jobs:
         run: |
           PRERELEASE=""
           [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
-          gh release create "$GITHUB_REF_NAME" "$ZIP" $PRERELEASE --title "FTX1 Status $VERSION" --generate-notes --notes "$(cat <<NOTES
+          gh release create "$TAG" "$ZIP" $PRERELEASE --target "$(git rev-parse HEAD)" --title "FTX1 Status $VERSION" --generate-notes --notes "$(cat <<NOTES
           Install with Homebrew:
 
               brew install --cask evil-wizard-corp/tap/ftx1-status
@@ -46,7 +58,7 @@ jobs:
           )"
 
       - name: Update Homebrew tap
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(env.TAG, '-') }}
         env:
           TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
         run: |
