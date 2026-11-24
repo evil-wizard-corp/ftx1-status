@@ -1,3 +1,5 @@
+<img src="Icon/AppIcon.png" width="128" alt="FTX1 Status icon" align="right">
+
 # FTX1 Status
 
 A macOS menu bar app that checks why WSJT-X can't reach a Yaesu FTX-1. It refreshes every 5 seconds, and the menu bar icon turns green, yellow, or red.
