@@ -37,7 +37,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>FTX1 Status</string>
   <key>CFBundleDisplayName</key><string>FTX1 Status</string>
-  <key>CFBundleIdentifier</key><string>local.ftx1status</string>
+  <key>CFBundleIdentifier</key><string>io.github.evil-wizard-corp.ftx1status</string>
   <key>CFBundleExecutable</key><string>FTX1Status</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
